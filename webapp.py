@@ -1,5 +1,5 @@
 import streamlit as st
-import sqlite3
+from supabase import create_client, Client
 from groq import Groq
 import re
 import pandas as pd
@@ -10,53 +10,40 @@ import hashlib
 import time
 
 # ==========================================
-# 1. CONFIGURACIÓN
+# 1. CONFIGURACIÓN (NUBE Y GROQ)
 # ==========================================
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+url = st.secrets["SUPABASE_URL"]
+key = st.secrets["SUPABASE_KEY"]
+supabase: Client = create_client(url, key)
 
 # ==========================================
-# 2. BASE DE DATOS
+# 2. BASE DE DATOS EN LA NUBE (SUPABASE)
 # ==========================================
-def inicializar_db():
-    conn = sqlite3.connect('ledger.db')
-    cursor = conn.cursor()
-    # ESTA LÍNEA BORRA LA TABLA VIEJA PARA CREAR LA NUEVA CON EL HASH
-    cursor.execute('DROP TABLE IF EXISTS transacciones') 
-    cursor.execute('''CREATE TABLE IF NOT EXISTS transacciones 
-                      (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                       producto TEXT, comprador TEXT, vendedor TEXT, monto REAL, estado TEXT, hash_contrato TEXT)''')
-    conn.commit()
-    conn.close()
-
 def guardar_transaccion(producto, comprador, vendedor, monto, estado, hash_contrato):
-    conn = sqlite3.connect('ledger.db')
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO transacciones (producto, comprador, vendedor, monto, estado, hash_contrato) VALUES (?, ?, ?, ?, ?, ?)", 
-                   (producto, comprador, vendedor, monto, estado, hash_contrato))
-    conn.commit()
-    conn.close()
+    data = {
+        "producto": producto, "comprador": comprador, "vendedor": vendedor, 
+        "monto": monto, "estado": estado, "hash_contrato": hash_contrato
+    }
+    supabase.table("transacciones").insert(data).execute()
 
 def obtener_transacciones():
-    conn = sqlite3.connect('ledger.db')
-    df = pd.read_sql_query("SELECT * from transacciones", conn)
-    conn.close()
-    return df
+    response = supabase.table("transacciones").select("*").execute()
+    if response.data:
+        return pd.DataFrame(response.data)
+    return pd.DataFrame()
 
 # ==========================================
-# 3. ORÁCULO EN VIVO (MERCADOS)
+# 3. ORÁCULO Y BÚSQUEDA
 # ==========================================
 def obtener_precio_mercado():
     try:
-        # Obtenemos el precio del Bitcoin en tiempo real como referencia
         ticker = yf.Ticker("BTC-USD")
         precio = ticker.history(period="1d")['Close'].iloc[-1]
         return f"${precio:,.2f} USD"
     except:
         return "Datos no disponibles"
 
-# ==========================================
-# 4. BÚSQUEDA EN INTERNET
-# ==========================================
 def buscar_precio_real(producto):
     try:
         with DDGS() as ddgs:
@@ -68,7 +55,7 @@ def buscar_precio_real(producto):
     return "No se encontraron datos exactos, usa tu instinto."
 
 # ==========================================
-# 5. AGENTES DE IA
+# 4. AGENTES DE IA
 # ==========================================
 def chatear_con_agente(rol, producto, limite, personalidad, historial, info_web):
     if rol == "Vendedor":
@@ -85,7 +72,7 @@ def chatear_con_agente(rol, producto, limite, personalidad, historial, info_web)
     return chat.choices[0].message.content
 
 # ==========================================
-# 6. INTERFAZ WEB
+# 5. INTERFAZ WEB PREMIUM
 # ==========================================
 st.set_page_config(page_title="Agentic AI SaaS", page_icon="⚡", layout="wide")
 
@@ -107,8 +94,6 @@ st.markdown("""
 
 st.title("⚡ Agentic Commerce SaaS")
 st.markdown("Comercio B2B autónomo. Blindado por IA y validado con Firma Digital.")
-
-inicializar_db()
 
 # LOGIN
 if "autenticado" not in st.session_state:
@@ -203,7 +188,7 @@ with tab1:
         else:
             st.error("❌ Las IAs no llegaron a un acuerdo.")
 
-        # LÓGICA DE FIRMA DIGITAL HUMANA Y CONTRATO
+    # LÓGICA DE FIRMA DIGITAL HUMANA Y CONTRATO
     if st.session_state.acuerdo_actual is not None:
         st.warning("✍️ Se requiere autorización humana para ejecutar el pago y firmar el contrato.")
         
@@ -212,13 +197,12 @@ with tab1:
             texto_contrato = f"{datos['producto']}-{datos['precio']}-{time.time()}"
             hash_firma = hashlib.sha256(texto_contrato.encode()).hexdigest()
             
-            # Guardamos en DB
+            # Guardamos en la nube de Supabase
             guardar_transaccion(datos['producto'], "BuyerBot", "SellerBot", datos['precio'], "COMPLETADO - FIRMADO", hash_firma[:15] + "...")
             
-            st.success("✅ Contrato Firmado y guardado en el Ledger Inmutable.")
+            st.success("✅ Contrato Firmado y guardado en la Nube (Supabase).")
             st.balloons()
             
-            # Generar el archivo de contrato para descargar
             contrato_final = f"""
 =========================================
 CONTRATO DE COMERCIO AGÉNTICO B2B
@@ -241,11 +225,10 @@ y el Auditor de IA han verificado la transacción.
                 mime="text/plain"
             )
             
-            # Limpiamos la memoria para evitar doble firma
             st.session_state.acuerdo_actual = None
 
 with tab2:
-    st.subheader("📈 Historial de Transacciones (Ledger Inmutable)")
+    st.subheader("📈 Historial de Transacciones (Ledger en la Nube)")
     df = obtener_transacciones()
     if not df.empty:
         st.dataframe(df, use_container_width=True)
@@ -257,4 +240,4 @@ with tab2:
             fig = px.bar(df_exitosas, x='id', y='monto', color='producto', title="Precios de Cierre")
             st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("No hay datos aún.")
+        st.info("No hay datos aún en la nube.")
