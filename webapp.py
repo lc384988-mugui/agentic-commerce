@@ -1,5 +1,7 @@
 import streamlit as st
 from supabase import create_client, Client
+from supabase.lib.client_options import ClientOptions
+import httpx
 from groq import Groq
 import re
 import pandas as pd
@@ -15,7 +17,19 @@ import time
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
-supabase: Client = create_client(url, key)
+
+# Forzamos una conexión estable para evitar el error de red en Streamlit
+httpx_client = httpx.Client(
+    http2=False, 
+    timeout=httpx.Timeout(30.0, connect=10.0),
+    limits=httpx.Limits(max_keepalive_connections=10, max_connections=40)
+)
+
+supabase: Client = create_client(
+    url, 
+    key, 
+    options=ClientOptions(httpx_client=httpx_client)
+)
 
 # ==========================================
 # 2. BASE DE DATOS EN LA NUBE (SUPABASE)
