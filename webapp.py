@@ -20,6 +20,8 @@ client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 def inicializar_db():
     conn = sqlite3.connect('ledger.db')
     cursor = conn.cursor()
+    # ESTA LÍNEA BORRA LA TABLA VIEJA PARA CREAR LA NUEVA CON EL HASH
+    cursor.execute('DROP TABLE IF EXISTS transacciones') 
     cursor.execute('''CREATE TABLE IF NOT EXISTS transacciones 
                       (id INTEGER PRIMARY KEY AUTOINCREMENT, 
                        producto TEXT, comprador TEXT, vendedor TEXT, monto REAL, estado TEXT, hash_contrato TEXT)''')
