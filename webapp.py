@@ -1,43 +1,46 @@
 import streamlit as st
-import httpx
-from supabase import create_client, Client
-from supabase.lib.client_options import ClientOptions
-from groq import Groq
-import re
+import psycopg2
 import pandas as pd
 import plotly.express as px
+from groq import Groq
+import re
+import time
+import hashlib
 from duckduckgo_search import DDGS
 import yfinance as yf
-import hashlib
-import time
 
 # ==========================================
 # 1. CONFIGURACIÓN (NUBE Y GROQ)
 # ==========================================
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
-url = st.secrets["SUPABASE_URL"]
-key = st.secrets["SUPABASE_KEY"]
+DATABASE_URL = st.secrets["DATABASE_URL"]
 
-supabase: Client = create_client(url, key)
 # ==========================================
-# 2. BASE DE DATOS EN LA NUBE (SUPABASE)
+# 2. BASE DE DATOS (CONEXIÓN AL POOLER)
 # ==========================================
+def obtener_conexion():
+    return psycopg2.connect(DATABASE_URL)
+
 def guardar_transaccion(producto, comprador, vendedor, monto, estado, hash_contrato):
     try:
-        data = {
-            "producto": producto, "comprador": comprador, "vendedor": vendedor, 
-            "monto": monto, "estado": estado, "hash_contrato": hash_contrato
-        }
-        supabase.table("transacciones").insert(data).execute()
+        conn = obtener_conexion()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO transacciones (producto, comprador, vendedor, monto, estado, hash_contrato)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (producto, comprador, vendedor, monto, estado, hash_contrato))
+        conn.commit()
+        cur.close()
+        conn.close()
     except Exception as e:
         st.error(f"Error al guardar en Supabase: {e}")
 
 def obtener_transacciones():
     try:
-        response = supabase.table("transacciones").select("*").execute()
-        if response.data:
-            return pd.DataFrame(response.data)
-        return pd.DataFrame()
+        conn = obtener_conexion()
+        df = pd.read_sql_query("SELECT * FROM transacciones ORDER BY id DESC", conn)
+        conn.close()
+        return df
     except Exception as e:
         st.error(f"Error al obtener transacciones: {e}")
         return pd.DataFrame()
