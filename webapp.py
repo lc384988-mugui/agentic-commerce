@@ -18,10 +18,7 @@ client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
 
-# Forzamos HTTP/1.1 y un tiempo de espera para evitar el error de DNS
-opts = ClientOptions(postgrest_client_timeout=30)
-supabase: Client = create_client(url, key, options=opts)
-
+supabase: Client = create_client(url, key)
 # ==========================================
 # 2. BASE DE DATOS EN LA NUBE (SUPABASE)
 # ==========================================
