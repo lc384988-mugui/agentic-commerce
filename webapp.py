@@ -201,20 +201,46 @@ with tab1:
         else:
             st.error("❌ Las IAs no llegaron a un acuerdo.")
 
-    # LÓGICA DE FIRMA DIGITAL HUMANA (El Toque Exótico)
+        # LÓGICA DE FIRMA DIGITAL HUMANA Y CONTRATO
     if st.session_state.acuerdo_actual is not None:
         st.warning("✍️ Se requiere autorización humana para ejecutar el pago y firmar el contrato.")
         
-        if st.button("Firmar Contrato Digitalmente 🔐", use_container_width=True):
+        if st.button("🔐 Firmar y Generar Contrato Legal", use_container_width=True, type="primary"):
             datos = st.session_state.acuerdo_actual
-            # Generamos un Hash SHA-256 (como en Blockchain)
             texto_contrato = f"{datos['producto']}-{datos['precio']}-{time.time()}"
             hash_firma = hashlib.sha256(texto_contrato.encode()).hexdigest()
             
+            # Guardamos en DB
             guardar_transaccion(datos['producto'], "BuyerBot", "SellerBot", datos['precio'], "COMPLETADO - FIRMADO", hash_firma[:15] + "...")
-            st.success(f"✅ Contrato Firmado. Hash de seguridad: `{hash_firma[:15]}...`")
+            
+            st.success("✅ Contrato Firmado y guardado en el Ledger Inmutable.")
             st.balloons()
-            st.session_state.acuerdo_actual = None # Limpiamos la memoria
+            
+            # Generar el archivo de contrato para descargar
+            contrato_final = f"""
+=========================================
+CONTRATO DE COMERCIO AGÉNTICO B2B
+=========================================
+Producto: {datos['producto']}
+Precio Final Acordado: ${datos['precio']}
+Fecha: {time.strftime("%Y-%m-%d %H:%M:%S")}
+
+FIRMA CRIPTOGRÁFICA (SHA-256):
+{hash_firma}
+
+Validez: Este documento certifica que los agentes autónomos 
+y el Auditor de IA han verificado la transacción. 
+=========================================
+"""
+            st.download_button(
+                label="📄 Descargar Contrato (TXT)",
+                data=contrato_final,
+                file_name=f"Contrato_{datos['producto'].replace(' ', '_')}.txt",
+                mime="text/plain"
+            )
+            
+            # Limpiamos la memoria para evitar doble firma
+            st.session_state.acuerdo_actual = None
 
 with tab2:
     st.subheader("📈 Historial de Transacciones (Ledger Inmutable)")
