@@ -1,5 +1,7 @@
 import streamlit as st
+import httpx
 from supabase import create_client, Client
+from supabase.lib.client_options import ClientOptions
 from groq import Groq
 import re
 import pandas as pd
@@ -16,8 +18,9 @@ client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
 
-# Inicialización estándar de Supabase
-supabase: Client = create_client(url, key)
+# Forzamos HTTP/1.1 y un tiempo de espera para evitar el error de DNS
+opts = ClientOptions(postgrest_client_timeout=30)
+supabase: Client = create_client(url, key, options=opts)
 
 # ==========================================
 # 2. BASE DE DATOS EN LA NUBE (SUPABASE)
