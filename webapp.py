@@ -209,7 +209,6 @@ with tab1:
             texto_contrato = f"{datos['producto']}-{datos['precio']}-{time.time()}"
             hash_firma = hashlib.sha256(texto_contrato.encode()).hexdigest()
             
-            # Guardamos en la nube de Supabase
             guardar_transaccion(datos['producto'], "BuyerBot", "SellerBot", datos['precio'], "COMPLETADO - FIRMADO", hash_firma[:15] + "...")
             
             st.success("✅ Contrato Firmado y guardado en la Nube (Supabase).")
