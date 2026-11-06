@@ -4,4 +4,5 @@ pandas
 plotly
 duckduckgo-search
 yfinance
-supabase
+supabase==2.15.0
+httpx==0.27.0
