@@ -1,7 +1,5 @@
 import streamlit as st
 from supabase import create_client, Client
-from supabase.lib.client_options import ClientOptions
-import httpx
 from groq import Groq
 import re
 import pandas as pd
@@ -18,34 +16,31 @@ client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
 
-# Forzamos una conexión estable para evitar el error de red en Streamlit
-httpx_client = httpx.Client(
-    http2=False, 
-    timeout=httpx.Timeout(30.0, connect=10.0),
-    limits=httpx.Limits(max_keepalive_connections=10, max_connections=40)
-)
-
-supabase: Client = create_client(
-    url, 
-    key, 
-    options=ClientOptions(httpx_client=httpx_client)
-)
+# Inicialización estándar de Supabase
+supabase: Client = create_client(url, key)
 
 # ==========================================
 # 2. BASE DE DATOS EN LA NUBE (SUPABASE)
 # ==========================================
 def guardar_transaccion(producto, comprador, vendedor, monto, estado, hash_contrato):
-    data = {
-        "producto": producto, "comprador": comprador, "vendedor": vendedor, 
-        "monto": monto, "estado": estado, "hash_contrato": hash_contrato
-    }
-    supabase.table("transacciones").insert(data).execute()
+    try:
+        data = {
+            "producto": producto, "comprador": comprador, "vendedor": vendedor, 
+            "monto": monto, "estado": estado, "hash_contrato": hash_contrato
+        }
+        supabase.table("transacciones").insert(data).execute()
+    except Exception as e:
+        st.error(f"Error al guardar en Supabase: {e}")
 
 def obtener_transacciones():
-    response = supabase.table("transacciones").select("*").execute()
-    if response.data:
-        return pd.DataFrame(response.data)
-    return pd.DataFrame()
+    try:
+        response = supabase.table("transacciones").select("*").execute()
+        if response.data:
+            return pd.DataFrame(response.data)
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Error al obtener transacciones: {e}")
+        return pd.DataFrame()
 
 # ==========================================
 # 3. ORÁCULO Y BÚSQUEDA
