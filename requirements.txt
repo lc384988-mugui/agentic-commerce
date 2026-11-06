@@ -4,3 +4,4 @@ pandas
 plotly
 duckduckgo-search
 yfinance
+supabase
