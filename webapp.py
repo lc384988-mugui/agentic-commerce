@@ -1,5 +1,5 @@
 import streamlit as st
-import psycopg2
+from supabase import create_client, Client
 import pandas as pd
 import plotly.express as px
 from groq import Groq
@@ -10,83 +10,75 @@ from duckduckgo_search import DDGS
 import yfinance as yf
 
 # ==========================================
-# 1. CONFIGURACIÓN (NUBE Y GROQ)
+# 1. CONFIGURACIÓN
 # ==========================================
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
-DATABASE_URL = st.secrets["DATABASE_URL"]
+url = st.secrets["SUPABASE_URL"]
+key = st.secrets["SUPABASE_KEY"]
+supabase: Client = create_client(url, key)
 
 # ==========================================
-# 2. BASE DE DATOS (CONEXIÓN AL POOLER)
+# 2. BASE DE DATOS (SUPABASE)
 # ==========================================
-def obtener_conexion():
-    return psycopg2.connect(DATABASE_URL)
-
 def guardar_transaccion(producto, comprador, vendedor, monto, estado, hash_contrato):
+    data = {
+        "producto": producto, "comprador": comprador, "vendedor": vendedor, 
+        "monto": monto, "estado": estado, "hash_contrato": hash_contrato
+    }
     try:
-        conn = obtener_conexion()
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO transacciones (producto, comprador, vendedor, monto, estado, hash_contrato)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """, (producto, comprador, vendedor, monto, estado, hash_contrato))
-        conn.commit()
-        cur.close()
-        conn.close()
+        supabase.table("transacciones").insert(data).execute()
+        return True
     except Exception as e:
-        st.error(f"Error al guardar en Supabase: {e}")
+        st.error(f"Error en DB: {e}")
+        return False
+
+def actualizar_estado(id_transaccion, nuevo_estado):
+    try:
+        supabase.table("transacciones").update({"estado": nuevo_estado}).eq("id", id_transaccion).execute()
+    except Exception as e:
+        st.error(f"Error al actualizar: {e}")
 
 def obtener_transacciones():
     try:
-        conn = obtener_conexion()
-        df = pd.read_sql_query("SELECT * FROM transacciones ORDER BY id DESC", conn)
-        conn.close()
-        return df
+        res = supabase.table("transacciones").select("*").order("id", desc=True).execute()
+        if res.data:
+            return pd.DataFrame(res.data)
+        return pd.DataFrame()
     except Exception as e:
-        st.error(f"Error al obtener transacciones: {e}")
+        st.error(f"Error al obtener: {e}")
         return pd.DataFrame()
 
 # ==========================================
-# 3. ORÁCULO Y BÚSQUEDA
+# 3. AGENTES DE IA
 # ==========================================
-def obtener_precio_mercado():
-    try:
-        ticker = yf.Ticker("BTC-USD")
-        precio = ticker.history(period="1d")['Close'].iloc[-1]
-        return f"${precio:,.2f} USD"
-    except:
-        return "Datos no disponibles"
-
 def buscar_precio_real(producto):
     try:
         with DDGS() as ddgs:
-            results = list(ddgs.text(f"precio promedio de {producto} NZD", max_results=2))
-            if results:
-                return results[0]['body']
-    except:
-        pass
-    return "No se encontraron datos exactos, usa tu instinto."
+            results = list(ddgs.text(f"precio mayorista de {producto} NZD", max_results=2))
+            if results: return results[0]['body']
+    except: pass
+    return "No hay datos exactos, usa tu instinto."
 
-# ==========================================
-# 4. AGENTES DE IA
-# ==========================================
-def chatear_con_agente(rol, producto, limite, personalidad, historial, info_web):
-    if rol == "Vendedor":
-        prompt = f"Eres un vendedor de {producto}. Precio mínimo: ${limite}. Personalidad: {personalidad}. Info del mercado: {info_web}. SOLO discute el precio. Si aceptas, di exactamente: 'Acepto vender por $X'."
-    elif rol == "Auditor":
-        prompt = f"Eres un Auditor Legal de IA experto en comercio B2B. Se está negociando {producto} por un monto de ${limite}. Redacta un mini-contrato legal (máximo 2 líneas) validando la transacción. Termina siempre con: 'Trato Aprobado'."
-    else:
-        prompt = f"Eres un comprador de {producto}. Presupuesto máximo: ${limite}. Personalidad: {personalidad}. Info del mercado: {info_web}. SOLO discute el precio. Si aceptas, di exactamente: 'Acepto comprar por $X'."
-
+def agente_vendedor(nombre, producto, precio_min, personalidad, historial, info_web):
+    prompt = f"Eres {nombre}, proveedor mayorista de {producto}. Precio mínimo: ${precio_min}. Personalidad: {personalidad}. Info mercado: {info_web}. SOLO discute el precio. Si aceptas, di exactamente: 'Acepto vender por $X'."
     chat = client.chat.completions.create(
         messages=[{"role": "system", "content": prompt}] + historial,
         model="openai/gpt-oss-20b", 
     )
     return chat.choices[0].message.content
 
+def agente_comprador(producto, presupuesto, ofertas, info_web):
+    prompt = f"Eres comprador B2B de {producto}. Presupuesto max: ${presupuesto}. Ofertas: {ofertas}. Info mercado: {info_web}. Elige la mejor oferta. Di exactamente: 'Acepto comprar a [Nombre] por $X'."
+    chat = client.chat.completions.create(
+        messages=[{"role": "system", "content": prompt}],
+        model="openai/gpt-oss-20b", 
+    )
+    return chat.choices[0].message.content
+
 # ==========================================
-# 5. INTERFAZ WEB PREMIUM
+# 4. INTERFAZ WEB
 # ==========================================
-st.set_page_config(page_title="Agentic AI SaaS", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="Agentic B2B", page_icon="🏗️", layout="wide")
 
 st.markdown("""
     <style>
@@ -94,161 +86,104 @@ st.markdown("""
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     .stApp { background-color: #050505; font-family: 'Space Grotesk', sans-serif; }
     h1 { background: -webkit-linear-gradient(45deg, #00ffcc, #0099ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; font-size: 3rem !important; }
-    div[data-baseweb="input"] { background-color: #111 !important; border: 1px solid #333 !important; border-radius: 8px !important; }
-    div[data-baseweb="input"] > input { color: #00ffcc !important; -webkit-text-fill-color: #00ffcc !important; }
-    div[data-baseweb="select"] > div { background-color: #111 !important; border: 1px solid #333 !important; color: #00ffcc !important; }
     .stButton>button { background: linear-gradient(90deg, #00ffcc 0%, #0099ff 100%) !important; color: #000 !important; font-weight: 800 !important; border-radius: 8px !important; border: none !important; }
-    .stButton>button:hover { box-shadow: 0 0 15px rgba(0, 255, 204, 0.6) !important; }
-    [data-testid="stChatMessage"] { background-color: #0a0a0a !important; border-left: 4px solid #00ffcc !important; border-radius: 0px 10px 10px 0px !important; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
-    .stAlert { background-color: #111 !important; border: 1px solid #00ffcc !important; color: #fff !important; }
+    [data-testid="stChatMessage"] { background-color: #0a0a0a !important; border-left: 4px solid #00ffcc !important; }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ Agentic Commerce SaaS")
-st.markdown("Comercio B2B autónomo. Blindado por IA y validado con Firma Digital.")
+st.title("🏗️ Agentic B2B Negotiator")
+st.markdown("Especialistas en Materiales de Construcción y Repuestos.")
 
 # LOGIN
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
-
 if not st.session_state.autenticado:
-    st.subheader("🔒 Acceso Corporativo")
-    usuario = st.text_input("Usuario", "admin")
-    password = st.text_input("Contraseña", type="password", value="1234")
-    if st.button("Ingresar al Sistema"):
-        if password == "1234":
+    st.subheader("🔒 Acceso Cliente")
+    passw = st.text_input("Contraseña (Usa: 1234)", type="password")
+    if st.button("Ingresar"):
+        if passw == "1234":
             st.session_state.autenticado = True
             st.rerun()
-        else:
-            st.error("Contraseña incorrecta. (Usa: 1234)")
     st.stop()
 
-# BARRA LATERAL
+# SIDEBAR
 with st.sidebar:
-    st.header("⚙️ Panel de Control")
-    producto = st.text_input("Producto a negociar:", "Licencia de Software")
-    presupuesto_c = st.number_input("Presupuesto Comprador ($)", value=100)
-    precio_v = st.number_input("Mínimo Vendedor ($)", value=80)
-    personalidad = st.selectbox("Personalidad de los agentes:", ["Profesional", "Agresivo", "Amigable"])
+    st.header("⚙️ Panel de Negociación")
+    producto = st.selectbox("Producto a negociar:", ["Cemento y Acero", "Madera Estructural", "Repuestos de Autos", "Herramientas Eléctricas"])
+    presupuesto = st.number_input("Presupuesto ($):", value=5000)
     
     st.markdown("---")
-    st.subheader("📡 Oráculo de Mercado (Live)")
-    precio_live = obtener_precio_mercado()
-    st.metric(label="Bitcoin (BTC-USD) ahora", value=precio_live)
-    
-    if st.button("Cerrar Sesión"):
-        st.session_state.autenticado = False
-        st.rerun()
+    st.subheader("📡 Mercado (Live)")
+    try:
+        st.metric("Bitcoin", f"${yf.Ticker('BTC-USD').history(period='1d')['Close'].iloc[-1]:,.2f}")
+    except: pass
 
-# PESTAÑAS
-tab1, tab2 = st.tabs(["🤖 Simulador de Negociación", "📊 Dashboard de Datos"])
+# TABS
+tab1, tab2 = st.tabs(["🤝 Negociar", "📊 Panel del Dueño"])
 
 with tab1:
-    if "acuerdo_actual" not in st.session_state:
-        st.session_state.acuerdo_actual = None
-
-    if st.button("Iniciar Negociación Autónoma", use_container_width=True):
-        st.info(f"🌐 Buscando precios reales de '{producto}' en internet...")
+    if st.button("Iniciar Negociación B2B", use_container_width=True):
+        st.info(f"🌐 Buscando precios reales de '{producto}'...")
         info_web = buscar_precio_real(producto)
-        st.success("¡Datos de mercado obtenidos! Iniciando agentes...")
         
         col1, col2 = st.columns(2)
-        historial = [{"role": "user", "content": f"Hola, me interesa {producto}. Te ofrezco ${presupuesto_c - 30}."}]
-        acuerdo, precio_final = False, 0
+        oferta_inicial = presupuesto - 1000
+        hist = [{"role": "user", "content": f"Necesito {producto}. Ofrezco ${oferta_inicial}."}]
         
         with col1:
-            st.subheader("💼 Vendedor")
-            vendedor_placeholder = st.empty()
+            st.subheader("🏭 Proveedor A")
+            with st.spinner('Negociando...'):
+                resp_v1 = agente_vendedor("ProveedorA", producto, int(presupuesto * 0.6), "Agresivo y directo", hist, info_web)
+            st.chat_message("assistant", avatar="🏭").write(resp_v1)
+            
         with col2:
-            st.subheader("🛒 Comprador")
-            comprador_placeholder = st.empty()
-
-        for turno in range(3):
-            resp_v = chatear_con_agente("Vendedor", producto, precio_v, personalidad, historial, info_web)
-            with vendedor_placeholder.container():
-                st.chat_message("assistant", avatar="💼").write(resp_v)
-            historial.append({"role": "assistant", "content": resp_v})
+            st.subheader("🏭 Proveedor B")
+            with st.spinner('Negociando...'):
+                resp_v2 = agente_vendedor("ProveedorB", producto, int(presupuesto * 0.8), "Premium y formal", hist, info_web)
+            st.chat_message("assistant", avatar="👑").write(resp_v2)
             
-            if "acepto" in resp_v.lower() or "trato" in resp_v.lower():
-                try: precio_final = float(re.findall(r'\d+', resp_v)[0])
-                except: precio_final = precio_v
-                acuerdo = True
-                break
-                
-            resp_c = chatear_con_agente("Comprador", producto, presupuesto_c, personalidad, [{"role": "user", "content": f"El vendedor dijo: {resp_v}"}], info_web)
-            with comprador_placeholder.container():
-                st.chat_message("user", avatar="🛒").write(resp_c)
-            historial.append({"role": "user", "content": resp_c})
-            
-            if "acepto" in resp_c.lower() or "trato" in resp_c.lower():
-                try: precio_final = float(re.findall(r'\d+', resp_c)[0])
-                except: precio_final = presupuesto_c
-                acuerdo = True
-                break
-
-        if acuerdo:
-            st.write("---")
-            st.info("🛡️ Llamando al Agente Auditor (Escrow) para blindar la transacción...")
-            resp_auditor = chatear_con_agente("Auditor", producto, precio_final, "Estricto", [], info_web)
-            with st.chat_message("assistant", avatar="🛡️"):
-                st.write(resp_auditor)
-                
-            if "Aprobado" in resp_auditor:
-                st.session_state.acuerdo_actual = {"producto": producto, "precio": precio_final}
-            else:
-                st.error("❌ El Auditor rechazó el trato por riesgos legales.")
-        else:
-            st.error("❌ Las IAs no llegaron a un acuerdo.")
-
-    # LÓGICA DE FIRMA DIGITAL HUMANA Y CONTRATO
-    if st.session_state.acuerdo_actual is not None:
-        st.warning("✍️ Se requiere autorización humana para ejecutar el pago y firmar el contrato.")
+        st.info("🧠 Evaluando ofertas...")
+        ofertas = f"A: {resp_v1} | B: {resp_v2}"
+        resp_c = agente_comprador(producto, presupuesto, ofertas, info_web)
         
-        if st.button("🔐 Firmar y Generar Contrato Legal", use_container_width=True, type="primary"):
-            datos = st.session_state.acuerdo_actual
-            texto_contrato = f"{datos['producto']}-{datos['precio']}-{time.time()}"
-            hash_firma = hashlib.sha256(texto_contrato.encode()).hexdigest()
+        with st.chat_message("user", avatar="🛒"):
+            st.write(resp_c)
             
-            guardar_transaccion(datos['producto'], "BuyerBot", "SellerBot", datos['precio'], "COMPLETADO - FIRMADO", hash_firma[:15] + "...")
-            
-            st.success("✅ Contrato Firmado y guardado en la Nube (Supabase).")
-            st.balloons()
-            
-            contrato_final = f"""
-=========================================
-CONTRATO DE COMERCIO AGÉNTICO B2B
-=========================================
-Producto: {datos['producto']}
-Precio Final Acordado: ${datos['precio']}
-Fecha: {time.strftime("%Y-%m-%d %H:%M:%S")}
+        if "Acepto comprar" in resp_c:
+            try:
+                precio_final = float(re.findall(r'\$(\d+)', resp_c)[0])
+                v_elegido = "ProveedorA" if "A" in resp_c else "ProveedorB"
+            except:
+                precio_final = oferta_inicial
+                v_elegido = "Proveedor Desconocido"
+            st.session_state.acuerdo = {"prod": producto, "precio": precio_final, "vend": v_elegido}
 
-FIRMA CRIPTOGRÁFICA (SHA-256):
-{hash_firma}
-
-Validez: Este documento certifica que los agentes autónomos 
-y el Auditor de IA han verificado la transacción. 
-=========================================
-"""
-            st.download_button(
-                label="📄 Descargar Contrato (TXT)",
-                data=contrato_final,
-                file_name=f"Contrato_{datos['producto'].replace(' ', '_')}.txt",
-                mime="text/plain"
-            )
-            
-            st.session_state.acuerdo_actual = None
+    if "acuerdo" in st.session_state and st.session_state.acuerdo is not None:
+        d = st.session_state.acuerdo
+        st.success(f"✅ Trato negociado con {d['vend']} por ${d['precio']}.")
+        hash_f = hashlib.sha256(f"{d['prod']}-{d['precio']}-{time.time()}".encode()).hexdigest()[:15]
+        
+        contrato_txt = f"CONTRATO B2B\nProducto: {d['prod']}\nProveedor: {d['vend']}\nMonto: ${d['precio']}\nHASH: {hash_f}"
+        st.download_button("📄 Descargar Contrato", data=contrato_txt, file_name="contrato.txt")
+        
+        st.warning("⚠️ Para completar, transfiere a: **ASB Bank - 12-3456-7890123-00** (Concepto: Tu Nombre).")
+        
+        if st.button("✅ Marcar como Pagado (He hecho la transferencia)", type="primary"):
+            if guardar_transaccion(d['prod'], "ClienteNZ", d['vend'], d['precio'], "PENDIENTE DE PAGO", hash_f):
+                st.success("¡Registrado! Tu pedido está en proceso.")
+                st.session_state.acuerdo = None
+                st.balloons()
 
 with tab2:
-    st.subheader("📈 Historial de Transacciones (Ledger en la Nube)")
+    st.subheader("📊 Panel de Transacciones (Dueño)")
     df = obtener_transacciones()
     if not df.empty:
         st.dataframe(df, use_container_width=True)
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Descargar Reporte (CSV)", data=csv, file_name="reporte.csv", mime="text/csv")
-        
-        df_exitosas = df[df['estado'].str.contains('COMPLETADO', na=False)]
-        if not df_exitosas.empty:
-            fig = px.bar(df_exitosas, x='id', y='monto', color='producto', title="Precios de Cierre")
-            st.plotly_chart(fig, use_container_width=True)
+        st.markdown("---")
+        id_a_pagar = st.number_input("ID a marcar como PAGADA:", min_value=1, step=1)
+        if st.button("Confirmar Pago Recibido"):
+            actualizar_estado(id_a_pagar, "PAGADO")
+            st.success(f"Transacción {id_a_pagar} actualizada.")
+            st.rerun()
     else:
-        st.info("No hay datos aún en la nube.")
+        st.info("Aún no hay transacciones.")
