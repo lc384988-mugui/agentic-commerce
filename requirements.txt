@@ -4,4 +4,4 @@ pandas
 plotly
 duckduckgo-search
 yfinance
-psycopg2-binary
+supabase
