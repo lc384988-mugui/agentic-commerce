@@ -10,14 +10,17 @@ from duckduckgo_search import DDGS
 import yfinance as yf
 
 # ==========================================
-# 1. CONFIGURACIÓN
+# 1. CONFIGURACIÓN Y CACHÉ DE CONEXIÓN
 # ==========================================
-client = Groq(api_key=st.secrets["GROQ_API_KEY"])
-url = st.secrets["SUPABASE_URL"]
-key = st.secrets["SUPABASE_KEY"]
+# Esto guarda la conexión en memoria para evitar los ResourceWarning
+@st.cache_resource
+def init_supabase():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
 
-# Conexión estándar (A prueba de balas)
-supabase: Client = create_client(url, key)
+supabase = init_supabase()
+client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
 # ==========================================
 # 2. BASE DE DATOS (SUPABASE)
@@ -173,7 +176,7 @@ with tab1:
             if guardar_transaccion(d['prod'], "ClienteNZ", d['vend'], d['precio'], "PENDIENTE DE PAGO", hash_f):
                 st.success("¡Registrado! Tu pedido está en proceso.")
                 st.session_state.acuerdo = None
-                st.balloons()
+                st.rerun() # Forzamos a que recargue para que se limpie la pantalla
 
 with tab2:
     st.subheader("📊 Panel de Transacciones (Dueño)")
