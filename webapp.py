@@ -12,15 +12,15 @@ import yfinance as yf
 # ==========================================
 # 1. CONFIGURACIÓN Y CACHÉ DE CONEXIÓN
 # ==========================================
-# Esto guarda la conexión en memoria para evitar los ResourceWarning
 @st.cache_resource
 def init_supabase():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
+    # .strip() elimina cualquier espacio o "Enter" invisible que cause el error de DNS
+    url = st.secrets["SUPABASE_URL"].strip()
+    key = st.secrets["SUPABASE_KEY"].strip()
     return create_client(url, key)
 
 supabase = init_supabase()
-client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+client = Groq(api_key=st.secrets["GROQ_API_KEY"].strip())
 
 # ==========================================
 # 2. BASE DE DATOS (SUPABASE)
@@ -172,11 +172,15 @@ with tab1:
         
         st.warning("⚠️ Para completar, transfiere a: **ASB Bank - 12-3456-7890123-00** (Concepto: Tu Nombre).")
         
-        if st.button("✅ Marcar como Pagado (He hecho la transferencia)", type="primary"):
-            if guardar_transaccion(d['prod'], "ClienteNZ", d['vend'], d['precio'], "PENDIENTE DE PAGO", hash_f):
+        # Fix para evitar el mensaje duplicado: Usamos un key único
+        if st.button("✅ Marcar como Pagado (He hecho la transferencia)", type="primary", key="btn_pagar"):
+            exito = guardar_transaccion(d['prod'], "ClienteNZ", d['vend'], d['precio'], "PENDIENTE DE PAGO", hash_f)
+            if exito:
                 st.success("¡Registrado! Tu pedido está en proceso.")
                 st.session_state.acuerdo = None
-                st.rerun() # Forzamos a que recargue para que se limpie la pantalla
+                st.balloons()
+                time.sleep(2) # Pausa para que veas el mensaje
+                st.rerun()
 
 with tab2:
     st.subheader("📊 Panel de Transacciones (Dueño)")
