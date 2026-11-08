@@ -5,3 +5,4 @@ plotly
 duckduckgo-search
 yfinance
 supabase
+httpx
