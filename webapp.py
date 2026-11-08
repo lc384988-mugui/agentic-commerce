@@ -1,5 +1,7 @@
 import streamlit as st
+import httpx
 from supabase import create_client, Client
+from supabase.lib.client_options import ClientOptions
 import pandas as pd
 import plotly.express as px
 from groq import Groq
@@ -10,12 +12,18 @@ from duckduckgo_search import DDGS
 import yfinance as yf
 
 # ==========================================
-# 1. CONFIGURACIÓN
+# 1. CONFIGURACIÓN (CONEXIÓN FORZADA IPv4)
 # ==========================================
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
-supabase: Client = create_client(url, key)
+
+# Forzamos IPv4 para evitar el error de red de Streamlit
+transport = httpx.HTTPTransport(retries=3, local_address="0.0.0.0")
+httpx_client = httpx.Client(transport=transport)
+opts = ClientOptions(httpx_client=httpx_client)
+
+supabase: Client = create_client(url, key, options=opts)
 
 # ==========================================
 # 2. BASE DE DATOS (SUPABASE)
